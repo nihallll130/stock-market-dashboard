@@ -36,6 +36,4 @@ See [FEATURES.md](FEATURES.md) for complete feature documentation.
 
 MIT License - see [LICENSE](LICENSE) file
 
-## Author
-
-Created with ❤️ for stock market enthusiasts
+LIVE LINK - https://tori-unopinionated-crawly.ngrok-free.dev
