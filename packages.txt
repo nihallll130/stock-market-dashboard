@@ -1,3 +1,0 @@
-python3-dev
-libta-lib0
-libta-lib-dev
