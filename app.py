@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import yfinance as yf
-import talib
 from config import *
 from models import StockDatabase
 
@@ -11,7 +10,7 @@ db = StockDatabase(DB_PATH)
 
 st.title("📈 Stock Market Dashboard")
 
-page = st.sidebar.radio("Menu", ["Dashboard", "Watchlist", "Portfolio", "Alerts", "Settings"])
+page = st.sidebar.radio("Menu", ["Dashboard", "Watchlist", "Portfolio", "Settings"])
 
 @st.cache_data(ttl=3600)
 def get_stock_data(ticker: str, period: str = "1y") -> pd.DataFrame:
@@ -31,12 +30,23 @@ def get_current_price(ticker: str) -> float:
 if page == "Dashboard":
     st.subheader("📊 View Stocks")
     ticker = st.selectbox("Select Stock:", POPULAR_STOCKS)
-    period = st.selectbox("Period:", ["1mo", "3mo", "6mo", "1y", "5y"])
+    period = st.selectbox("Period:", ["1mo", "3mo", "6mo", "1y"])
     
     df = get_stock_data(ticker, period)
     if not df.empty:
         price = float(df['Close'].iloc[-1])
         st.metric(f"{ticker} Price", f"${price:.2f}")
+        
+        # Simple candlestick chart
+        fig = go.Figure(data=[go.Candlestick(
+            x=df.index,
+            open=df['Open'],
+            high=df['High'],
+            low=df['Low'],
+            close=df['Close']
+        )])
+        fig.update_layout(title=f"{ticker} Price Chart", xaxis_title="Date", yaxis_title="Price", height=500)
+        st.plotly_chart(fig, use_container_width=True)
         
         if st.button("⭐ Add to Watchlist"):
             if db.add_to_watchlist(ticker, ticker):
@@ -68,46 +78,46 @@ elif page == "Watchlist":
 elif page == "Portfolio":
     st.subheader("💼 Portfolio")
     
-    ticker = st.text_input("Ticker:", "AAPL").upper()
-    qty = st.number_input("Quantity:", min_value=0.01, value=1.0)
-    price = st.number_input("Price:", min_value=0.01, value=150.0)
-    trans = st.radio("Type:", ["BUY", "SELL"])
+    col1, col2 = st.columns(2)
     
-    if st.button("Add Transaction"):
-        db.add_portfolio_transaction(ticker, qty, price, trans)
-        st.success(f"✅ Added {trans} transaction!")
+    with col1:
+        st.write("**Add Transaction**")
+        ticker = st.text_input("Ticker:", "AAPL").upper()
+        qty = st.number_input("Quantity:", min_value=0.01, value=1.0)
+        price = st.number_input("Price:", min_value=0.01, value=150.0)
+        trans = st.radio("Type:", ["BUY", "SELL"])
+        
+        if st.button("Add Transaction"):
+            db.add_portfolio_transaction(ticker, qty, price, trans)
+            st.success(f"✅ Added {trans} transaction!")
     
-    portfolio = db.get_portfolio()
-    if portfolio:
-        for holding in portfolio:
-            t = holding['ticker']
-            q = float(holding['total_qty'])
-            cp = get_current_price(t)
-            if cp:
-                st.write(f"**{t}**: {q:.2f} shares @ ${cp:.2f}")
-
-elif page == "Alerts":
-    st.subheader("🔔 Alerts")
-    
-    ticker = st.text_input("Ticker:", "AAPL").upper()
-    alert_type = st.selectbox("Type:", ALERT_TYPES)
-    threshold = st.number_input("Threshold (%):", value=5.0)
-    
-    if st.button("Create Alert"):
-        if db.add_alert(ticker, alert_type, threshold):
-            st.success("✅ Alert created!")
-    
-    alerts = db.get_alerts()
-    if alerts:
-        for alert in alerts:
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                st.write(f"**{alert['ticker']}** - {alert['alert_type']}")
-            with col2:
-                if st.button("❌", key=f"del_{alert['id']}"):
-                    db.remove_alert(alert['id'])
-                    st.rerun()
+    with col2:
+        st.write("**Your Holdings**")
+        portfolio = db.get_portfolio()
+        if portfolio:
+            for holding in portfolio:
+                t = holding['ticker']
+                q = float(holding['total_qty'])
+                ac = float(holding['avg_cost'])
+                cp = get_current_price(t)
+                if cp:
+                    gain = (cp - ac) * q
+                    pct = (gain / (ac * q) * 100) if ac * q > 0 else 0
+                    st.write(f"**{t}**: {q:.2f} @ ${ac:.2f}")
+                    st.write(f"Value: ${cp * q:.2f} | Gain: ${gain:.2f} ({pct:.1f}%)")
+        else:
+            st.info("No holdings yet!")
 
 elif page == "Settings":
     st.subheader("⚙️ Settings")
-    st.info("✅ App is running locally. Data saved to SQLite.")
+    st.write("""
+    **Stock Market Dashboard** - Real-time stock tracking
+    
+    ✅ Features:
+    - Live stock prices
+    - Watchlist management
+    - Portfolio tracking
+    - Buy/Sell transactions
+    
+    📊 Data source: yfinance
+    """)
