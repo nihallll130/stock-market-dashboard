@@ -23,7 +23,8 @@ def get_stock_data(ticker: str, period: str = "1y") -> pd.DataFrame:
 def get_current_price(ticker: str) -> float:
     try:
         data = yf.download(ticker, period='1d', progress=False)
-        return float(data['Close'].iloc[-1])
+        val = data['Close'].iloc[-1]
+        return float(val.item() if hasattr(val, 'item') else val)
     except:
         return None
 
@@ -34,10 +35,10 @@ if page == "Dashboard":
     
     df = get_stock_data(ticker, period)
     if not df.empty:
-        price = float(df['Close'].iloc[-1])
+        val = df['Close'].iloc[-1]
+        price = float(val.item() if hasattr(val, 'item') else val)
         st.metric(f"{ticker} Price", f"${price:.2f}")
         
-        # Simple candlestick chart
         fig = go.Figure(data=[go.Candlestick(
             x=df.index,
             open=df['Open'],
