@@ -12,24 +12,23 @@ st.title("📈 Stock Market Dashboard")
 
 page = st.sidebar.radio("Menu", ["Dashboard", "Watchlist", "Portfolio", "Settings"])
 
-def get_stock_data(ticker: str, period: str = "1y") -> pd.DataFrame:
+@st.cache_data(ttl=300)
+def get_stock_data(ticker: str, period: str = "1y"):
     """Fetch stock data from yfinance"""
     try:
         df = yf.download(ticker, period=period, progress=False)
-        if df.empty:
-            return pd.DataFrame()
         return df
     except Exception as e:
-        return pd.DataFrame()
+        st.error(f"Error fetching data: {e}")
+        return None
 
-def get_current_price(ticker: str) -> float:
+def get_current_price(ticker: str):
     """Get current stock price"""
     try:
         data = yf.download(ticker, period='5d', progress=False)
-        if data.empty:
-            return None
-        close_val = data['Close'].iloc[-1]
-        return float(close_val)
+        if data is not None and not data.empty:
+            return float(data['Close'].iloc[-1])
+        return None
     except:
         return None
 
@@ -42,49 +41,56 @@ if page == "Dashboard":
     with col2:
         period = st.selectbox("Period:", ["1mo", "3mo", "6mo", "1y"])
     
-    if st.button("Load Stock Data"):
+    if st.button("📊 Load Stock Data"):
         with st.spinner(f"Fetching {ticker} data..."):
             df = get_stock_data(ticker, period)
             
-            if not df.empty:
+            if df is not None and not df.empty:
                 try:
-                    latest_close = df['Close'].iloc[-1]
+                    # Remove NaN values
+                    df_clean = df.dropna()
                     
-                    if hasattr(latest_close, 'item'):
-                        price = float(latest_close.item())
-                    else:
-                        price = float(latest_close)
-                    
-                    if price > 0:
-                        st.metric(f"{ticker} Latest Price", f"${price:.2f}")
+                    if len(df_clean) > 0:
+                        # Get latest close price
+                        latest_close = df_clean['Close'].iloc[-1]
+                        latest_price = float(latest_close)
                         
+                        # Display price
+                        st.metric(f"💰 {ticker} Price", f"${latest_price:.2f}")
+                        
+                        # Candlestick chart
                         fig = go.Figure(data=[go.Candlestick(
                             x=df.index,
                             open=df['Open'],
                             high=df['High'],
                             low=df['Low'],
-                            close=df['Close']
+                            close=df['Close'],
+                            name=ticker
                         )])
                         fig.update_layout(
                             title=f"{ticker} - {period}",
-                            xaxis_title="Date",
-                            yaxis_title="Price ($)",
+                            yaxis_title='Price (USD)',
+                            xaxis_title='Date',
                             height=500
                         )
                         st.plotly_chart(fig, use_container_width=True)
                         
+                        # Add to watchlist button
                         if st.button(f"⭐ Add {ticker} to Watchlist"):
                             if db.add_to_watchlist(ticker, ticker):
                                 st.success(f"✅ Added {ticker}!")
                             else:
                                 st.info(f"{ticker} already in watchlist")
                     else:
-                        st.error("❌ Invalid price data")
+                        st.error("❌ No valid price data found")
                 
+                except ValueError as e:
+                    st.error(f"❌ Data Error: {e}")
                 except Exception as e:
-                    st.error(f"Error: {str(e)}")
+                    st.error(f"❌ Error: {e}")
             else:
                 st.error(f"❌ Could not fetch data for {ticker}")
+                st.info("Try selecting a different stock or wait a moment")
 
 elif page == "Watchlist":
     st.subheader("⭐ Your Watchlist")
@@ -100,18 +106,17 @@ elif page == "Watchlist":
                 if price:
                     st.write(f"**{ticker}** - ${price:.2f}")
                 else:
-                    st.write(f"**{ticker}** - Data unavailable")
+                    st.write(f"**{ticker}** - N/A")
             
             with col2:
-                if st.button("View", key=f"view_{ticker}"):
-                    st.info(f"View {ticker} from Dashboard")
+                st.text("")
             
             with col3:
                 if st.button("❌", key=f"remove_{ticker}"):
                     db.remove_from_watchlist(ticker)
                     st.rerun()
     else:
-        st.info("No stocks in watchlist. Add from Dashboard!")
+        st.info("No stocks in watchlist")
 
 elif page == "Portfolio":
     st.subheader("💼 Portfolio")
@@ -122,45 +127,45 @@ elif page == "Portfolio":
         st.write("**Add Transaction**")
         ticker = st.text_input("Ticker:", "AAPL").upper()
         qty = st.number_input("Quantity:", min_value=0.01, value=1.0)
-        price = st.number_input("Price:", min_value=0.01, value=150.0)
-        trans = st.radio("Type:", ["BUY", "SELL"])
+        price_input = st.number_input("Price per share:", min_value=0.01, value=150.0)
+        trans_type = st.radio("Type:", ["BUY", "SELL"])
         
         if st.button("Add Transaction"):
-            db.add_portfolio_transaction(ticker, qty, price, trans)
-            st.success(f"✅ {trans} transaction added!")
+            db.add_portfolio_transaction(ticker, qty, price_input, trans_type)
+            st.success(f"✅ {trans_type} added!")
     
     with col2:
-        st.write("**Your Holdings**")
+        st.write("**Holdings**")
         portfolio = db.get_portfolio()
         if portfolio:
             for holding in portfolio:
-                t = holding['ticker']
-                q = float(holding['total_qty'])
-                ac = float(holding['avg_cost'])
-                cp = get_current_price(t)
+                ticker = holding['ticker']
+                qty = float(holding['total_qty'])
+                avg_cost = float(holding['avg_cost'])
+                current_price = get_current_price(ticker)
                 
-                if cp:
-                    value = cp * q
-                    gain = value - (ac * q)
-                    pct = (gain / (ac * q) * 100) if ac * q > 0 else 0
+                if current_price:
+                    value = qty * current_price
+                    gain_loss = value - (qty * avg_cost)
+                    pct = (gain_loss / (qty * avg_cost) * 100) if avg_cost > 0 else 0
                     
-                    st.write(f"**{t}**")
-                    st.write(f"Qty: {q:.2f} | Cost: ${ac:.2f}")
-                    st.write(f"Value: ${value:.2f} | Gain: ${gain:.2f} ({pct:.1f}%)")
+                    st.write(f"**{ticker}**")
+                    st.write(f"Qty: {qty:.2f} | Value: ${value:.2f}")
+                    st.write(f"Gain/Loss: ${gain_loss:.2f} ({pct:.1f}%)")
                     st.divider()
         else:
-            st.info("No holdings yet!")
+            st.info("No holdings")
 
 elif page == "Settings":
     st.subheader("⚙️ Settings")
-    st.info("""
+    st.write("""
     **Stock Market Dashboard**
     
-    ✅ Real-time stock tracking
-    ✅ Watchlist management
-    ✅ Portfolio tracking
+    Features:
+    - Real-time stock prices
+    - Watchlist tracking
+    - Portfolio management
+    - Interactive charts
     
-    📊 Data: yfinance
-    💾 Storage: SQLite
+    Data: yfinance
     """)
-   
