@@ -12,48 +12,78 @@ st.title("📈 Stock Market Dashboard")
 
 page = st.sidebar.radio("Menu", ["Dashboard", "Watchlist", "Portfolio", "Settings"])
 
-@st.cache_data(ttl=3600)
 def get_stock_data(ticker: str, period: str = "1y") -> pd.DataFrame:
+    """Fetch stock data from yfinance"""
     try:
-        return yf.download(ticker, period=period, progress=False)
-    except:
+        df = yf.download(ticker, period=period, progress=False)
+        if df.empty:
+            st.warning(f"No data found for {ticker}")
+            return pd.DataFrame()
+        return df
+    except Exception as e:
+        st.error(f"Error fetching {ticker}: {str(e)}")
         return pd.DataFrame()
 
-@st.cache_data(ttl=3600)
 def get_current_price(ticker: str) -> float:
+    """Get current stock price"""
     try:
-        data = yf.download(ticker, period='1d', progress=False)
-        val = data['Close'].iloc[-1]
-        return float(val.item() if hasattr(val, 'item') else val)
+        data = yf.download(ticker, period='5d', progress=False)
+        if data.empty:
+            return None
+        close_val = data['Close'].iloc[-1]
+        return float(close_val)
     except:
         return None
 
 if page == "Dashboard":
     st.subheader("📊 View Stocks")
-    ticker = st.selectbox("Select Stock:", POPULAR_STOCKS)
-    period = st.selectbox("Period:", ["1mo", "3mo", "6mo", "1y"])
+    col1, col2 = st.columns(2)
     
-    df = get_stock_data(ticker, period)
-    if not df.empty:
-        val = df['Close'].iloc[-1]
-        price = float(val.item() if hasattr(val, 'item') else val)
-        st.metric(f"{ticker} Price", f"${price:.2f}")
-        
-        fig = go.Figure(data=[go.Candlestick(
-            x=df.index,
-            open=df['Open'],
-            high=df['High'],
-            low=df['Low'],
-            close=df['Close']
-        )])
-        fig.update_layout(title=f"{ticker} Price Chart", xaxis_title="Date", yaxis_title="Price", height=500)
-        st.plotly_chart(fig, use_container_width=True)
-        
-        if st.button("⭐ Add to Watchlist"):
-            if db.add_to_watchlist(ticker, ticker):
-                st.success(f"✅ Added {ticker}!")
+    with col1:
+        ticker = st.selectbox("Select Stock:", POPULAR_STOCKS)
+    with col2:
+        period = st.selectbox("Period:", ["1mo", "3mo", "6mo", "1y"])
+    
+    if st.button("Load Stock Data"):
+        with st.spinner(f"Fetching {ticker} data..."):
+            df = get_stock_data(ticker, period)
+            
+            if not df.empty:
+                try:
+                    # Get latest price
+                    latest_close = df['Close'].iloc[-1]
+                    if pd.isna(latest_close):
+                        st.error("Latest price is NaN - data issue")
+                    else:
+                        price = float(latest_close)
+                        st.metric(f"{ticker} Latest Price", f"${price:.2f}")
+                        
+                        # Candlestick chart
+                        fig = go.Figure(data=[go.Candlestick(
+                            x=df.index,
+                            open=df['Open'],
+                            high=df['High'],
+                            low=df['Low'],
+                            close=df['Close']
+                        )])
+                        fig.update_layout(
+                            title=f"{ticker} - {period}",
+                            xaxis_title="Date",
+                            yaxis_title="Price ($)",
+                            height=500
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        if st.button(f"⭐ Add {ticker} to Watchlist"):
+                            if db.add_to_watchlist(ticker, ticker):
+                                st.success(f"✅ Added {ticker}!")
+                            else:
+                                st.info(f"{ticker} already in watchlist")
+                
+                except Exception as e:
+                    st.error(f"Error processing data: {e}")
             else:
-                st.info(f"{ticker} already in watchlist")
+                st.error(f"Could not fetch data for {ticker}. Try again later.")
 
 elif page == "Watchlist":
     st.subheader("⭐ Your Watchlist")
@@ -61,20 +91,26 @@ elif page == "Watchlist":
     
     if watchlist:
         for item in watchlist:
-            col1, col2 = st.columns([3, 1])
+            col1, col2, col3 = st.columns([2, 1, 1])
             ticker = item['ticker']
             price = get_current_price(ticker)
             
             with col1:
                 if price:
                     st.write(f"**{ticker}** - ${price:.2f}")
+                else:
+                    st.write(f"**{ticker}** - Data unavailable")
             
             with col2:
+                if st.button("View", key=f"view_{ticker}"):
+                    st.info(f"View {ticker} from Dashboard")
+            
+            with col3:
                 if st.button("❌", key=f"remove_{ticker}"):
                     db.remove_from_watchlist(ticker)
                     st.rerun()
     else:
-        st.info("📭 Empty. Add stocks from Dashboard!")
+        st.info("No stocks in watchlist. Add from Dashboard!")
 
 elif page == "Portfolio":
     st.subheader("💼 Portfolio")
@@ -90,7 +126,7 @@ elif page == "Portfolio":
         
         if st.button("Add Transaction"):
             db.add_portfolio_transaction(ticker, qty, price, trans)
-            st.success(f"✅ Added {trans} transaction!")
+            st.success(f"✅ {trans} transaction added!")
     
     with col2:
         st.write("**Your Holdings**")
@@ -101,24 +137,28 @@ elif page == "Portfolio":
                 q = float(holding['total_qty'])
                 ac = float(holding['avg_cost'])
                 cp = get_current_price(t)
+                
                 if cp:
-                    gain = (cp - ac) * q
+                    value = cp * q
+                    gain = value - (ac * q)
                     pct = (gain / (ac * q) * 100) if ac * q > 0 else 0
-                    st.write(f"**{t}**: {q:.2f} @ ${ac:.2f}")
-                    st.write(f"Value: ${cp * q:.2f} | Gain: ${gain:.2f} ({pct:.1f}%)")
+                    
+                    st.write(f"**{t}**")
+                    st.write(f"Qty: {q:.2f} | Cost: ${ac:.2f}")
+                    st.write(f"Value: ${value:.2f} | Gain: ${gain:.2f} ({pct:.1f}%)")
+                    st.divider()
         else:
             st.info("No holdings yet!")
 
 elif page == "Settings":
     st.subheader("⚙️ Settings")
-    st.write("""
-    **Stock Market Dashboard** - Real-time stock tracking
+    st.info("""
+    **Stock Market Dashboard**
     
-    ✅ Features:
-    - Live stock prices
-    - Watchlist management
-    - Portfolio tracking
-    - Buy/Sell transactions
+    ✅ Real-time stock tracking
+    ✅ Watchlist management
+    ✅ Portfolio tracking
     
-    📊 Data source: yfinance
+    📊 Data: yfinance
+    💾 Storage: SQLite
     """)
