@@ -19,7 +19,6 @@ def get_stock_data(ticker: str, period: str = "1y"):
         df = yf.download(ticker, period=period, progress=False)
         return df
     except Exception as e:
-        st.error(f"Error fetching data: {e}")
         return None
 
 def get_current_price(ticker: str):
@@ -27,7 +26,11 @@ def get_current_price(ticker: str):
     try:
         data = yf.download(ticker, period='5d', progress=False)
         if data is not None and not data.empty:
-            return float(data['Close'].iloc[-1])
+            close_val = data['Close'].iloc[-1]
+            if hasattr(close_val, 'item'):
+                return float(close_val.item())
+            else:
+                return float(close_val)
         return None
     except:
         return None
@@ -47,18 +50,18 @@ if page == "Dashboard":
             
             if df is not None and not df.empty:
                 try:
-                    # Remove NaN values
                     df_clean = df.dropna()
                     
                     if len(df_clean) > 0:
-                        # Get latest close price
-                        latest_close = df_clean['Close'].iloc[-1]
-                        latest_price = float(latest_close)
+                        close_val = df_clean['Close'].iloc[-1]
                         
-                        # Display price
+                        if hasattr(close_val, 'item'):
+                            latest_price = float(close_val.item())
+                        else:
+                            latest_price = float(close_val)
+                        
                         st.metric(f"💰 {ticker} Price", f"${latest_price:.2f}")
                         
-                        # Candlestick chart
                         fig = go.Figure(data=[go.Candlestick(
                             x=df.index,
                             open=df['Open'],
@@ -75,22 +78,18 @@ if page == "Dashboard":
                         )
                         st.plotly_chart(fig, use_container_width=True)
                         
-                        # Add to watchlist button
                         if st.button(f"⭐ Add {ticker} to Watchlist"):
                             if db.add_to_watchlist(ticker, ticker):
                                 st.success(f"✅ Added {ticker}!")
                             else:
                                 st.info(f"{ticker} already in watchlist")
                     else:
-                        st.error("❌ No valid price data found")
+                        st.error("❌ No valid data")
                 
-                except ValueError as e:
-                    st.error(f"❌ Data Error: {e}")
                 except Exception as e:
-                    st.error(f"❌ Error: {e}")
+                    st.error(f"❌ Error: {str(e)}")
             else:
                 st.error(f"❌ Could not fetch data for {ticker}")
-                st.info("Try selecting a different stock or wait a moment")
 
 elif page == "Watchlist":
     st.subheader("⭐ Your Watchlist")
@@ -168,4 +167,4 @@ elif page == "Settings":
     - Interactive charts
     
     Data: yfinance
-    """)
+    """) 
